@@ -1,33 +1,55 @@
 // app/lib/gameData.js
-export const CSV_URL = "./example.csv";
+export const CSV_URL = "/example.csv";
+
+const POINT_VALUES = [100, 200, 300, 400, 500];
 
 function parseCsvSimple(text) {
-  // Simple CSV parser (assumes no commas inside fields)
-  const lines = text.split(/\r?\n/).filter(Boolean);
+  // Simple parser: assumes no commas inside fields.
+  // Handles missing trailing columns & strips UTF-8 BOM.
+  const cleaned = text.replace(/^\uFEFF/, "");
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
   const headers = lines[0].split(",").map((h) => h.trim());
   const rows = [];
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(","); // simple split
+    const cols = lines[i].split(",").map((c) => c.trim());
+    while (cols.length < headers.length) cols.push(""); // pad trailing empties
+
     const obj = {};
     for (let j = 0; j < headers.length; j++) {
-      obj[headers[j]] = (cols[j] ?? "").trim();
+      obj[headers[j]] = cols[j] ?? "";
     }
     rows.push(obj);
   }
+
   return rows;
 }
 
 function normalizeCategory(row) {
-  // handle "Catagory" misspelling + any other variants
   return (row.Catagory || row.Category || row.category || "").trim();
 }
 
 function toPoints(row) {
   const n = Number(row.Points);
   return Number.isFinite(n) ? n : NaN;
+}
+
+function pickPicture(row) {
+  return (row.Picture || row.picture || row.Image || row.image || "").trim();
+}
+
+function pickYoutube(row) {
+  // IMPORTANT: your CSV uses "Youtube"
+  return (
+    row.Youtube ||
+    row.YouTube ||
+    row.YOUTUBE ||
+    row.youtube ||
+    row["You Tube"] ||
+    ""
+  ).trim();
 }
 
 function isYoutubeUrl(s) {
@@ -37,17 +59,21 @@ function isYoutubeUrl(s) {
 }
 
 function toYoutubeEmbed(url) {
-  // Accepts youtube watch URLs, youtu.be, or already-embed URLs
+  if (!url) return "";
   try {
     if (url.includes("/embed/")) return url;
 
     // youtu.be/<id>
-    const ytShort = url.match(/youtu\.be\/([^?&]+)/i);
-    if (ytShort?.[1]) return `https://www.youtube.com/embed/${ytShort[1]}`;
+    const short = url.match(/youtu\.be\/([^?&/]+)/i);
+    if (short?.[1]) return `https://www.youtube.com/embed/${short[1]}`;
 
     // youtube.com/watch?v=<id>
-    const vMatch = url.match(/[?&]v=([^?&]+)/i);
-    if (vMatch?.[1]) return `https://www.youtube.com/embed/${vMatch[1]}`;
+    const v = url.match(/[?&]v=([^?&/]+)/i);
+    if (v?.[1]) return `https://www.youtube.com/embed/${v[1]}`;
+
+    // youtube.com/shorts/<id>
+    const shorts = url.match(/youtube\.com\/shorts\/([^?&/]+)/i);
+    if (shorts?.[1]) return `https://www.youtube.com/embed/${shorts[1]}`;
 
     return url; // fallback
   } catch {
@@ -56,22 +82,25 @@ function toYoutubeEmbed(url) {
 }
 
 export function buildGameFromRows(rows) {
-  // Build map: category -> Map(points -> clueObj)
+  // category -> Map(points -> entry)
   const byCat = new Map();
 
   for (const r of rows) {
     const category = normalizeCategory(r);
     const points = toPoints(r);
     if (!category || !Number.isFinite(points)) continue;
+    if (!POINT_VALUES.includes(points)) continue;
 
     const clue = (r.Clue ?? "").trim();
     const answer = (r.Answer ?? "").trim();
-    const picture = (r.Picture ?? "").trim();
+    const picture = pickPicture(r);
+    const youtube = pickYoutube(r);
+    const youtubeEmbedUrl = isYoutubeUrl(youtube) ? toYoutubeEmbed(youtube) : "";
 
     if (!byCat.has(category)) byCat.set(category, new Map());
-
-    // If duplicates exist, keep the first occurrence for that (category, points)
     const catMap = byCat.get(category);
+
+    // Keep first occurrence per (category, points)
     if (!catMap.has(points)) {
       catMap.set(points, {
         category,
@@ -79,45 +108,36 @@ export function buildGameFromRows(rows) {
         clue,
         answer,
         picture,
-        clueIsYoutube: isYoutubeUrl(clue),
-        youtubeEmbedUrl: isYoutubeUrl(clue) ? toYoutubeEmbed(clue) : "",
+        youtube,
+        youtubeEmbedUrl,
       });
     }
   }
 
-  // Determine categories (in order of appearance)
-  const allCategoriesInOrder = [];
+  // categories in appearance order (first 6)
+  const seen = new Set();
+  const categories = [];
   for (const r of rows) {
     const c = normalizeCategory(r);
-    if (c && !allCategoriesInOrder.includes(c)) allCategoriesInOrder.push(c);
+    if (c && !seen.has(c)) {
+      seen.add(c);
+      categories.push(c);
+    }
+    if (categories.length === 6) break;
   }
-
-  // Take first 6 unique categories; pad if fewer
-  const categories = allCategoriesInOrder.slice(0, 6);
   while (categories.length < 6) categories.push(`Category ${categories.length + 1}`);
 
-  // Ensure each category has points 100..500 sorted
-  const pointValues = [100, 200, 300, 400, 500];
-  const cluesByCategory = {};
-
-  for (const cat of categories) {
-    const catMap = byCat.get(cat) || new Map();
-    cluesByCategory[cat] = pointValues
-      .slice()
-      .sort((a, b) => a - b)
-      .map((p) => catMap.get(p) ?? null); // null if missing
-  }
-
-  // Also provide direct lookup
+  // lookup[category][points] = entry|null
   const lookup = {};
   for (const cat of categories) {
     lookup[cat] = {};
-    for (const p of [100, 200, 300, 400, 500]) {
-      lookup[cat][p] = (byCat.get(cat) || new Map()).get(p) ?? null;
+    const catMap = byCat.get(cat) || new Map();
+    for (const p of POINT_VALUES) {
+      lookup[cat][p] = catMap.get(p) ?? null;
     }
   }
 
-  return { categories, lookup };
+  return { categories, lookup, pointValues: POINT_VALUES };
 }
 
 export async function loadGameData() {

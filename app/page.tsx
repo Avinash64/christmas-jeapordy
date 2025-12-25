@@ -3,18 +3,19 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
-const categories = ["history", "science", "movies", "sports", "music", "random"];
-const values = [100, 200, 300, 400, 500];
+import { loadGameData } from "./lib/gameData";
 
 const STORAGE_KEY = "jeopardy_revealed_v1";
 const TEAMS_KEY = "jeopardy_teams_v1";
 const ACTIVE_TEAM_KEY = "jeopardy_active_team_v1";
 
+const values = [100, 200, 300, 400, 500];
+
 function tileKey(category, value) {
   return `${category}:${value}`;
 }
 
+// (keep your existing teams code that now works)
 const DEFAULT_TEAMS = [
   { id: 1, name: "Team 1", points: 0 },
   { id: 2, name: "Team 2", points: 0 },
@@ -26,11 +27,10 @@ function clampName(s) {
   return (s ?? "").toString().slice(0, 20);
 }
 
-function loadTeams() {
+function loadTeamsSafe() {
   try {
     const raw = localStorage.getItem(TEAMS_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-
     if (Array.isArray(parsed)) {
       const byId = new Map(parsed.map((t) => [Number(t?.id), t]));
       return DEFAULT_TEAMS.map((d) => {
@@ -42,76 +42,68 @@ function loadTeams() {
         };
       });
     }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_TEAMS;
-}
-
-function saveTeams(teams) {
-  try {
-    localStorage.setItem(TEAMS_KEY, JSON.stringify(teams));
   } catch {}
+  return DEFAULT_TEAMS;
 }
 
 function loadActiveTeamId() {
   try {
-    const raw = localStorage.getItem(ACTIVE_TEAM_KEY);
-    const n = Number(raw);
+    const n = Number(localStorage.getItem(ACTIVE_TEAM_KEY));
     return [1, 2, 3, 4].includes(n) ? n : 1;
   } catch {
     return 1;
   }
 }
 
-function saveActiveTeamId(id) {
-  try {
-    localStorage.setItem(ACTIVE_TEAM_KEY, String(id));
-  } catch {}
-}
-
 export default function Home() {
   const router = useRouter();
 
+  const [didHydrate, setDidHydrate] = useState(false);
   const [revealed, setRevealed] = useState(() => new Set());
   const [teams, setTeams] = useState(DEFAULT_TEAMS);
   const [activeTeamId, setActiveTeamId] = useState(1);
 
-  // prevents "save defaults over loaded data"
-  const [didHydrate, setDidHydrate] = useState(false);
+  // NEW: csv-driven categories + lookup
+  const [categories, setCategories] = useState([]);
+  const [lookup, setLookup] = useState(null);
 
-  // Load everything on mount
   useEffect(() => {
-    // revealed
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) setRevealed(new Set(arr));
-    } catch {}
+    (async () => {
+      // load csv
+      const data = await loadGameData();
+      setCategories(data.categories);
+      setLookup(data.lookup);
 
-    // teams
-    setTeams(loadTeams());
+      // load revealed
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        const arr = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(arr)) setRevealed(new Set(arr));
+      } catch {}
 
-    // active team
-    setActiveTeamId(loadActiveTeamId());
+      // load teams + active team
+      setTeams(loadTeamsSafe());
+      setActiveTeamId(loadActiveTeamId());
 
-    // allow saving AFTER initial load completes
-    setDidHydrate(true);
+      setDidHydrate(true);
+    })();
   }, []);
 
-  // Save teams only after initial hydrate
   useEffect(() => {
     if (!didHydrate) return;
-    saveTeams(teams);
+    try {
+      localStorage.setItem(TEAMS_KEY, JSON.stringify(teams));
+    } catch {}
   }, [teams, didHydrate]);
 
-  // Save active team only after initial hydrate
   useEffect(() => {
     if (!didHydrate) return;
-    saveActiveTeamId(activeTeamId);
+    try {
+      localStorage.setItem(ACTIVE_TEAM_KEY, String(activeTeamId));
+    } catch {}
   }, [activeTeamId, didHydrate]);
 
-  const headers = useMemo(() => categories, []);
+  const headers = useMemo(() => categories, [categories]);
 
   const updateTeam = (id, patch) => {
     setTeams((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
@@ -121,13 +113,20 @@ export default function Home() {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(TEAMS_KEY);
     localStorage.removeItem(ACTIVE_TEAM_KEY);
-
     setRevealed(new Set());
     setTeams(DEFAULT_TEAMS);
     setActiveTeamId(1);
-
     router.push("/");
   };
+
+  // If CSV not loaded yet
+  if (headers.length === 0 || !lookup) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-blue-800 font-sans text-yellow-300">
+        Loading board…
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-blue-800 font-sans">
@@ -137,7 +136,6 @@ export default function Home() {
           <div className="rounded bg-blue-900 px-3 py-2 text-sm font-bold text-yellow-300 shadow">
             Active team:
           </div>
-
           {teams.map((t) => {
             const active = t.id === activeTeamId;
             return (
@@ -171,13 +169,9 @@ export default function Home() {
               >
                 <input
                   value={team.name}
-                  onChange={(e) =>
-                    updateTeam(team.id, { name: clampName(e.target.value) })
-                  }
+                  onChange={(e) => updateTeam(team.id, { name: clampName(e.target.value) })}
                   className="mb-2 w-full rounded bg-blue-800/60 px-3 py-2 text-sm font-bold text-yellow-300 outline-none placeholder:text-yellow-300/50"
-                  placeholder={`Team ${team.id}`}
                 />
-
                 <div className="text-2xl font-extrabold">{team.points}</div>
               </div>
             );
@@ -186,6 +180,7 @@ export default function Home() {
 
         {/* Board */}
         <div className="grid grid-cols-6 grid-rows-6 gap-3">
+          {/* Headers */}
           {headers.map((cat) => (
             <div
               key={cat}
@@ -195,18 +190,18 @@ export default function Home() {
             </div>
           ))}
 
+          {/* Tiles */}
           {values.flatMap((value) =>
-            categories.map((category) => {
+            headers.map((category) => {
               const key = tileKey(category, value);
               const isRevealed = revealed.has(key);
 
-              if (isRevealed) {
+              // if CSV doesn't have a clue for this slot, make it blank
+              const exists = !!lookup?.[category]?.[value];
+
+              if (isRevealed || !exists) {
                 return (
-                  <div
-                    key={key}
-                    className="h-20 rounded bg-blue-700/40 shadow"
-                    aria-label="revealed tile"
-                  />
+                  <div key={key} className="h-20 rounded bg-blue-700/40 shadow" />
                 );
               }
 
