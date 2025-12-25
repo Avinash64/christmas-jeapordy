@@ -4,27 +4,77 @@ export const CSV_TEXT_KEY = "jeopardy_csv_text_v1";
 
 const POINT_VALUES = [100, 200, 300, 400, 500];
 
-function parseCsvSimple(text) {
-  const cleaned = (text ?? "").replace(/^\uFEFF/, "");
-  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
-
-  const headers = lines[0].split(",").map((h) => h.trim());
+function parseCsv(text) {
+  const s = (text ?? "").replace(/^\uFEFF/, "");
   const rows = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(",").map((c) => c.trim());
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        // Escaped quote: ""
+        if (s[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    // not in quotes
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field);
+      field = "";
+      rows.push(row);
+      row = [];
+    } else if (ch === "\r") {
+      // ignore CR (handles CRLF)
+      continue;
+    } else {
+      field += ch;
+    }
+  }
+
+  // last field
+  row.push(field);
+  rows.push(row);
+
+  // remove empty trailing rows
+  const cleaned = rows
+    .map((r) => r.map((c) => (c ?? "").trim()))
+    .filter((r) => r.some((c) => c.length > 0));
+
+  if (cleaned.length === 0) return [];
+
+  const headers = cleaned[0].map((h) => h.trim());
+  const data = cleaned.slice(1);
+
+  return data.map((cols) => {
+    // pad missing columns
     while (cols.length < headers.length) cols.push("");
 
     const obj = {};
     for (let j = 0; j < headers.length; j++) {
-      obj[headers[j]] = cols[j] ?? "";
+      obj[headers[j]] = (cols[j] ?? "").trim();
     }
-    rows.push(obj);
-  }
-
-  return rows;
+    return obj;
+  });
 }
+
 
 function normalizeCategory(row) {
   return (row.Catagory || row.Category || row.category || "").trim();
@@ -77,7 +127,7 @@ function toYoutubeEmbed(url) {
 }
 
 export function buildGameFromText(csvText) {
-  const rows = parseCsvSimple(csvText);
+  const rows = parseCsv(csvText);
 
   const byCat = new Map();
 

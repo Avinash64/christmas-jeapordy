@@ -24,6 +24,14 @@ function tileKey(category: string, value: number) {
   return `${category}:${value}`;
 }
 
+function clearAllLocalGameData() {
+  localStorage.removeItem("jeopardy_revealed_v1");
+  localStorage.removeItem("jeopardy_teams_v1");
+  localStorage.removeItem("jeopardy_active_team_v1");
+  localStorage.removeItem("jeopardy_csv_text_v1");
+}
+
+
 function loadTeamsSafe() {
   try {
     const raw = localStorage.getItem(TEAMS_KEY);
@@ -154,6 +162,29 @@ export default function Home() {
     e.target.value = "";
   };
 
+
+  const resetEverythingConfirmed = async () => {
+  const ok = window.confirm(
+    "This will reset the board, teams, scores, active team, and uploaded CSV.\n\nAre you sure?"
+  );
+
+  if (!ok) return;
+
+  clearAllLocalGameData();
+
+  // reset in-memory state
+  setRevealed(new Set());
+  setTeams(DEFAULT_TEAMS);
+  setActiveTeamId(1);
+  setCsvName("");
+
+  // reload default CSV
+  await refreshGameFromSource();
+
+  // close settings dropdown
+  setSettingsOpen(false);
+};
+
   const useDefaultCsv = async () => {
     localStorage.removeItem(CSV_TEXT_KEY);
     setCsvName("Default (/public/example.csv)");
@@ -243,7 +274,21 @@ export default function Home() {
                     </button>
                   );
                 })}
+
               </div>
+                {/* Danger zone */}
+                <div className="mt-6 border-t border-blue-700 pt-4">
+                  <button
+                    onClick={resetEverythingConfirmed}
+                    className="rounded bg-red-600 px-4 py-2 text-sm font-bold text-white shadow hover:bg-red-500"
+                  >
+                    Reset ALL game data
+                  </button>
+
+                  <div className="mt-1 text-xs text-yellow-300/70">
+                    Clears board, teams, scores, and uploaded CSV
+                  </div>
+                </div>
             </div>
           )}
         </div>
