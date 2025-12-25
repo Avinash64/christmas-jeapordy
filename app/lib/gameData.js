@@ -1,12 +1,11 @@
 // app/lib/gameData.js
 export const CSV_URL = "/example.csv";
+export const CSV_TEXT_KEY = "jeopardy_csv_text_v1";
 
 const POINT_VALUES = [100, 200, 300, 400, 500];
 
 function parseCsvSimple(text) {
-  // Simple parser: assumes no commas inside fields.
-  // Handles missing trailing columns & strips UTF-8 BOM.
-  const cleaned = text.replace(/^\uFEFF/, "");
+  const cleaned = (text ?? "").replace(/^\uFEFF/, "");
   const lines = cleaned.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
@@ -15,7 +14,7 @@ function parseCsvSimple(text) {
 
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",").map((c) => c.trim());
-    while (cols.length < headers.length) cols.push(""); // pad trailing empties
+    while (cols.length < headers.length) cols.push("");
 
     const obj = {};
     for (let j = 0; j < headers.length; j++) {
@@ -41,7 +40,6 @@ function pickPicture(row) {
 }
 
 function pickYoutube(row) {
-  // IMPORTANT: your CSV uses "Youtube"
   return (
     row.Youtube ||
     row.YouTube ||
@@ -63,26 +61,24 @@ function toYoutubeEmbed(url) {
   try {
     if (url.includes("/embed/")) return url;
 
-    // youtu.be/<id>
     const short = url.match(/youtu\.be\/([^?&/]+)/i);
     if (short?.[1]) return `https://www.youtube.com/embed/${short[1]}`;
 
-    // youtube.com/watch?v=<id>
     const v = url.match(/[?&]v=([^?&/]+)/i);
     if (v?.[1]) return `https://www.youtube.com/embed/${v[1]}`;
 
-    // youtube.com/shorts/<id>
     const shorts = url.match(/youtube\.com\/shorts\/([^?&/]+)/i);
     if (shorts?.[1]) return `https://www.youtube.com/embed/${shorts[1]}`;
 
-    return url; // fallback
+    return url;
   } catch {
     return url;
   }
 }
 
-export function buildGameFromRows(rows) {
-  // category -> Map(points -> entry)
+export function buildGameFromText(csvText) {
+  const rows = parseCsvSimple(csvText);
+
   const byCat = new Map();
 
   for (const r of rows) {
@@ -100,7 +96,7 @@ export function buildGameFromRows(rows) {
     if (!byCat.has(category)) byCat.set(category, new Map());
     const catMap = byCat.get(category);
 
-    // Keep first occurrence per (category, points)
+    // first occurrence wins for (category, points)
     if (!catMap.has(points)) {
       catMap.set(points, {
         category,
@@ -114,7 +110,7 @@ export function buildGameFromRows(rows) {
     }
   }
 
-  // categories in appearance order (first 6)
+  // categories in appearance order
   const seen = new Set();
   const categories = [];
   for (const r of rows) {
@@ -127,7 +123,6 @@ export function buildGameFromRows(rows) {
   }
   while (categories.length < 6) categories.push(`Category ${categories.length + 1}`);
 
-  // lookup[category][points] = entry|null
   const lookup = {};
   for (const cat of categories) {
     lookup[cat] = {};
@@ -141,9 +136,19 @@ export function buildGameFromRows(rows) {
 }
 
 export async function loadGameData() {
+  // 1) prefer uploaded CSV from localStorage
+  try {
+    const stored = localStorage.getItem(CSV_TEXT_KEY);
+    if (stored && stored.trim().length > 0) {
+      return buildGameFromText(stored);
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2) fallback to public/example.csv
   const res = await fetch(CSV_URL, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch ${CSV_URL}`);
   const text = await res.text();
-  const rows = parseCsvSimple(text);
-  return buildGameFromRows(rows);
+  return buildGameFromText(text);
 }

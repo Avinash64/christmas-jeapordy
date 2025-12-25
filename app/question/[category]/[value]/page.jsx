@@ -146,17 +146,7 @@ export default function QuestionPage() {
           </div>
         ) : null}
 
-        {/* Picture */}
-        {entry?.picture ? (
-          <div className="mb-6 overflow-hidden rounded bg-blue-800/40">
-            <img
-              src={entry.picture}
-              alt="clue image"
-              className="w-full object-contain"
-              loading="lazy"
-            />
-          </div>
-        ) : null}
+        
 
         {/* Clue text */}
         <h1 className="mb-6 text-2xl font-extrabold">
@@ -214,7 +204,19 @@ export default function QuestionPage() {
         ) : (
           <div className="mb-6 rounded bg-blue-800/60 p-4">
             <div className="text-sm font-bold opacity-90">Answer</div>
+            
             <div className="text-lg">{entry?.answer ?? "No answer set."}</div>
+          {/* Picture */}
+        {entry?.picture ? (
+          <div className="mb-6 overflow-hidden rounded bg-blue-800/40">
+            <img
+              src={entry.picture}
+              alt="clue image"
+              className="w-full object-contain"
+              loading="lazy"
+            />
+          </div>
+        ) : null}
           </div>
         )}
 
