@@ -1,13 +1,30 @@
 import Image from "next/image";
 
-export default function ItemCard({value}) {
+type ItemCardProps = {
+  value: number | string;
+  onClick?: () => void;
+  disabled?: boolean;
+  className?: string;
+};
+
+export default function ItemCard({
+  value,
+  onClick,
+  disabled = false,
+  className = "",
+}: ItemCardProps) {
   return (
-<div className=" rounded overflow-hidden shadow-lg">
-          <div className="px-6 py-4 flex items-center justify-center" >
-            <div className="font-bold text-xl mb-2">{value}</div>
-
-          </div>
-
-        </div>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "h-20 w-full rounded bg-blue-700 text-2xl font-extrabold text-yellow-300 shadow hover:bg-blue-600 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-blue-700/40",
+        className,
+      ].join(" ")}
+      aria-label={`tile ${value}`}
+    >
+      {typeof value === "number" ? `$${value}` : value}
+    </button>
   );
 }
