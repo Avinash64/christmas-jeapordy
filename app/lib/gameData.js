@@ -106,25 +106,85 @@ function isYoutubeUrl(s) {
   return u.includes("youtube.com") || u.includes("youtu.be");
 }
 
-function toYoutubeEmbed(url) {
-  if (!url) return "";
+function parseYouTubeStartSeconds(url) {
   try {
-    if (url.includes("/embed/")) return url;
+    const u = new URL(url);
 
-    const short = url.match(/youtu\.be\/([^?&/]+)/i);
-    if (short?.[1]) return `https://www.youtube.com/embed/${short[1]}`;
+    // Common keys
+    const t = u.searchParams.get("t");
+    const start = u.searchParams.get("start");
+    const time = t ?? start;
+    if (!time) return 0;
 
-    const v = url.match(/[?&]v=([^?&/]+)/i);
-    if (v?.[1]) return `https://www.youtube.com/embed/${v[1]}`;
+    // If it's purely digits, it's seconds.
+    if (/^\d+$/.test(time)) return Number(time);
 
-    const shorts = url.match(/youtube\.com\/shorts\/([^?&/]+)/i);
-    if (shorts?.[1]) return `https://www.youtube.com/embed/${shorts[1]}`;
+    // Parse formats like 1h2m3s or 9m53s or 30s
+    let seconds = 0;
+    const h = time.match(/(\d+)h/i);
+    const m = time.match(/(\d+)m/i);
+    const s = time.match(/(\d+)s/i);
+    if (h) seconds += Number(h[1]) * 3600;
+    if (m) seconds += Number(m[1]) * 60;
+    if (s) seconds += Number(s[1]);
 
-    return url;
+    return Number.isFinite(seconds) ? seconds : 0;
   } catch {
-    return url;
+    return 0;
   }
 }
+
+function toYoutubeEmbed(url) {
+  if (!url) return "";
+
+  const startSeconds = parseYouTubeStartSeconds(url);
+
+  // Extract video ID from several formats
+  let id = "";
+
+  // youtu.be/<id>
+  const short = url.match(/youtu\.be\/([^?&/]+)/i);
+  if (short?.[1]) id = short[1];
+
+  // youtube.com/watch?v=<id>
+  if (!id) {
+    const v = url.match(/[?&]v=([^?&/]+)/i);
+    if (v?.[1]) id = v[1];
+  }
+
+  // youtube.com/live/<id>
+  if (!id) {
+    const live = url.match(/youtube\.com\/live\/([^?&/]+)/i);
+    if (live?.[1]) id = live[1];
+  }
+
+  // youtube.com/shorts/<id>
+  if (!id) {
+    const shorts = url.match(/youtube\.com\/shorts\/([^?&/]+)/i);
+    if (shorts?.[1]) id = shorts[1];
+  }
+
+  // already embed?
+  if (!id && url.includes("/embed/")) {
+    // preserve existing embed url but add start if missing
+    try {
+      const u = new URL(url);
+      if (startSeconds > 0 && !u.searchParams.get("start")) {
+        u.searchParams.set("start", String(startSeconds));
+      }
+      return u.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  if (!id) return url; // fallback
+
+  const embed = new URL(`https://www.youtube.com/embed/${id}`);
+  if (startSeconds > 0) embed.searchParams.set("start", String(startSeconds));
+  return embed.toString();
+}
+
 
 export function buildGameFromText(csvText) {
   const rows = parseCsv(csvText);
